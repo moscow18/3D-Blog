@@ -4,7 +4,7 @@ require('dotenv').config();
 const config = {
     user: process.env.DB_USER,
     password: process.env.DB_PASSWORD,
-    server: '127.0.0.1', 
+    server: process.env.DB_SERVER || '127.0.0.1', 
     port: 1433, // استخدام المنفذ الافتراضي الذي سنثبته الآن
     database: process.env.DB_NAME,
     options: {

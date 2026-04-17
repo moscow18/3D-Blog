@@ -1,30 +1,24 @@
-const sql = require('mssql');
+const { Pool } = require('pg');
 require('dotenv').config();
 
-const config = {
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    server: process.env.DB_SERVER || '127.0.0.1', 
-    port: 1433, // استخدام المنفذ الافتراضي الذي سنثبته الآن
-    database: process.env.DB_NAME,
-    options: {
-        encrypt: false, 
-        trustServerCertificate: true,
-        connectTimeout: 30000 
-    }
-};
+// Use DATABASE_URL from environment variables
+const isProduction = process.env.NODE_ENV === 'production';
 
-const poolPromise = new sql.ConnectionPool(config)
-    .connect()
-    .then(pool => {
-        console.log('✅ Connected successfully to SQL Server');
-        return pool;
-    })
+const pool = new Pool({
+    connectionString: process.env.DATABASE_URL,
+    ssl: isProduction ? { rejectUnauthorized: false } : false
+});
+
+// Test connection
+pool.connect()
+    .then(() => console.log('✅ Connected successfully to PostgreSQL (Supabase)'))
     .catch(err => {
-        console.error('❌ Database Connection Failed! Error: ', err.message);
-        process.exit(1);
+        console.error('❌ PostgreSQL Connection Failed! Error: ', err.message);
+        // Don't exit process in dev if possible, but for server it's critical
+        if (isProduction) process.exit(1);
     });
 
 module.exports = {
-    sql, poolPromise
+    query: (text, params) => pool.query(text, params),
+    poolPromise: Promise.resolve(pool) // Helper for transitioning from mssql code
 };

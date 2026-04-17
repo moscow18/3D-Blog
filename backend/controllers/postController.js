@@ -1,37 +1,35 @@
-const { poolPromise, sql } = require('../config/db');
+const { query } = require('../config/db');
 
 const getAllPosts = async (req, res) => {
     try {
         const { search, tag, userId } = req.query;
-        const pool = await poolPromise;
-        const request = pool.request();
-        
-        let query = `
-            SELECT P.*, U.Name as AuthorName 
+        let params = [];
+        let queryStr = `
+            SELECT P.*, U.Name as "AuthorName" 
             FROM Posts P 
             JOIN Users U ON P.UserId = U.Id 
             WHERE 1=1
         `;
 
         if (search) {
-            request.input('Search', sql.NVarChar, `%${search}%`);
-            query += ` AND (P.Title LIKE @Search OR P.Content LIKE @Search)`;
+            params.push(`%${search}%`);
+            queryStr += ` AND (P.Title ILIKE $${params.length} OR P.Content ILIKE $${params.length})`;
         }
 
         if (tag) {
-            request.input('Tag', sql.NVarChar, `%${tag}%`);
-            query += ` AND P.Tags LIKE @Tag`;
+            params.push(`%${tag}%`);
+            queryStr += ` AND P.Tags ILIKE $${params.length}`;
         }
 
         if (userId) {
-            request.input('UserId', sql.Int, userId);
-            query += ` AND P.UserId = @UserId`;
+            params.push(userId);
+            queryStr += ` AND P.UserId = $${params.length}`;
         }
 
-        query += ` ORDER BY P.CreatedAt DESC`;
+        queryStr += ` ORDER BY P.CreatedAt DESC`;
 
-        const result = await request.query(query);
-        res.json(result.recordset);
+        const result = await query(queryStr, params);
+        res.json(result.rows);
     } catch (err) {
         console.error('Error fetching posts:', err);
         res.status(500).json({ message: 'Server error fetching posts' });
@@ -41,21 +39,18 @@ const getAllPosts = async (req, res) => {
 const getPostById = async (req, res) => {
     try {
         const { id } = req.params;
-        const pool = await poolPromise;
-        const result = await pool.request()
-            .input('Id', sql.Int, id)
-            .query(`
-                SELECT P.*, U.Name as AuthorName 
-                FROM Posts P 
-                JOIN Users U ON P.UserId = U.Id 
-                WHERE P.Id = @Id
-            `);
+        const result = await query(`
+            SELECT P.*, U.Name as "AuthorName" 
+            FROM Posts P 
+            JOIN Users U ON P.UserId = U.Id 
+            WHERE P.Id = $1
+        `, [id]);
         
-        if (result.recordset.length === 0) {
+        if (result.rows.length === 0) {
             return res.status(404).json({ message: 'Post not found' });
         }
         
-        res.json(result.recordset[0]);
+        res.json(result.rows[0]);
     } catch (err) {
         console.error('Error fetching post:', err);
         res.status(500).json({ message: 'Server error fetching post' });
@@ -65,20 +60,16 @@ const getPostById = async (req, res) => {
 const createPost = async (req, res) => {
     try {
         const { title, content, imageUrl, tags } = req.body;
-        const userId = req.user.id; // From authMiddleware
+        const userId = req.user.id; 
 
         if (!title || !content) {
             return res.status(400).json({ message: 'Title and content are required' });
         }
 
-        const pool = await poolPromise;
-        await pool.request()
-            .input('Title', sql.NVarChar, title)
-            .input('Content', sql.NVarChar, content)
-            .input('ImageUrl', sql.NVarChar, imageUrl || '')
-            .input('Tags', sql.NVarChar, tags || '')
-            .input('UserId', sql.Int, userId)
-            .query('INSERT INTO Posts (Title, Content, ImageUrl, Tags, UserId) VALUES (@Title, @Content, @ImageUrl, @Tags, @UserId)');
+        await query(
+            'INSERT INTO Posts (Title, Content, ImageUrl, Tags, UserId) VALUES ($1, $2, $3, $4, $5)', 
+            [title, content, imageUrl || '', tags || '', userId]
+        );
 
         res.status(201).json({ message: 'Post created successfully' });
     } catch (err) {
@@ -93,28 +84,21 @@ const updatePost = async (req, res) => {
         const { title, content, imageUrl, tags } = req.body;
         const userId = req.user.id;
 
-        const pool = await poolPromise;
-        
         // Check if post belongs to user
-        const postCheck = await pool.request()
-            .input('Id', sql.Int, id)
-            .query('SELECT UserId FROM Posts WHERE Id = @Id');
+        const postCheck = await query('SELECT UserId FROM Posts WHERE Id = $1', [id]);
 
-        if (postCheck.recordset.length === 0) {
+        if (postCheck.rows.length === 0) {
             return res.status(404).json({ message: 'Post not found' });
         }
 
-        if (postCheck.recordset[0].UserId !== userId) {
+        if (postCheck.rows[0].userid !== userId && postCheck.rows[0].UserId !== userId) {
             return res.status(403).json({ message: 'Not authorized to update this post' });
         }
 
-        await pool.request()
-            .input('Id', sql.Int, id)
-            .input('Title', sql.NVarChar, title)
-            .input('Content', sql.NVarChar, content)
-            .input('ImageUrl', sql.NVarChar, imageUrl)
-            .input('Tags', sql.NVarChar, tags || '')
-            .query('UPDATE Posts SET Title = @Title, Content = @Content, ImageUrl = @ImageUrl, Tags = @Tags, UpdatedAt = GETDATE() WHERE Id = @Id');
+        await query(
+            'UPDATE Posts SET Title = $1, Content = $2, ImageUrl = $3, Tags = $4, UpdatedAt = NOW() WHERE Id = $5', 
+            [title, content, imageUrl, tags || '', id]
+        );
 
         res.json({ message: 'Post updated successfully' });
     } catch (err) {
@@ -128,24 +112,18 @@ const deletePost = async (req, res) => {
         const { id } = req.params;
         const userId = req.user.id;
 
-        const pool = await poolPromise;
-        
         // Check if post belongs to user
-        const postCheck = await pool.request()
-            .input('Id', sql.Int, id)
-            .query('SELECT UserId FROM Posts WHERE Id = @Id');
+        const postCheck = await query('SELECT UserId FROM Posts WHERE Id = $1', [id]);
 
-        if (postCheck.recordset.length === 0) {
+        if (postCheck.rows.length === 0) {
             return res.status(404).json({ message: 'Post not found' });
         }
 
-        if (postCheck.recordset[0].UserId !== userId) {
+        if (postCheck.rows[0].userid !== userId && postCheck.rows[0].UserId !== userId) {
             return res.status(403).json({ message: 'Not authorized to delete this post' });
         }
 
-        await pool.request()
-            .input('Id', sql.Int, id)
-            .query('DELETE FROM Posts WHERE Id = @Id');
+        await query('DELETE FROM Posts WHERE Id = $1', [id]);
 
         res.json({ message: 'Post deleted successfully' });
     } catch (err) {

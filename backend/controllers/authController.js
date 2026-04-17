@@ -1,4 +1,4 @@
-const { poolPromise, sql } = require('../config/db');
+const { query } = require('../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 
@@ -9,15 +9,11 @@ const register = async (req, res) => {
         if (!name || !email || !password) {
             return res.status(400).json({ message: 'All fields are required' });
         }
-
-        const pool = await poolPromise;
         
         // Check if user already exists
-        const userCheck = await pool.request()
-            .input('Email', sql.NVarChar, email)
-            .query('SELECT * FROM Users WHERE Email = @Email');
+        const userCheck = await query('SELECT * FROM Users WHERE Email = $1', [email]);
 
-        if (userCheck.recordset.length > 0) {
+        if (userCheck.rows.length > 0) {
             return res.status(400).json({ message: 'User already exists' });
         }
 
@@ -26,11 +22,10 @@ const register = async (req, res) => {
         const passwordHash = await bcrypt.hash(password, salt);
 
         // Insert user
-        await pool.request()
-            .input('Name', sql.NVarChar, name)
-            .input('Email', sql.NVarChar, email)
-            .input('PasswordHash', sql.NVarChar, passwordHash)
-            .query('INSERT INTO Users (Name, Email, PasswordHash) VALUES (@Name, @Email, @PasswordHash)');
+        await query(
+            'INSERT INTO Users (Name, Email, PasswordHash) VALUES ($1, $2, $3)', 
+            [name, email, passwordHash]
+        );
 
         res.status(201).json({ message: 'User registered successfully' });
     } catch (err) {
@@ -47,26 +42,22 @@ const login = async (req, res) => {
             return res.status(400).json({ message: 'Email and password are required' });
         }
 
-        const pool = await poolPromise;
-        const result = await pool.request()
-            .input('Email', sql.NVarChar, email)
-            .query('SELECT * FROM Users WHERE Email = @Email');
-
-        const user = result.recordset[0];
+        const result = await query('SELECT * FROM Users WHERE Email = $1', [email]);
+        const user = result.rows[0];
 
         if (!user) {
             return res.status(400).json({ message: 'Invalid credentials' });
         }
 
         // Verify password
-        const isMatch = await bcrypt.compare(password, user.PasswordHash);
+        const isMatch = await bcrypt.compare(password, user.passwordhash || user.PasswordHash);
         if (!isMatch) {
             return res.status(400).json({ message: 'Invalid credentials' });
         }
 
         // Generate JWT
         const token = jwt.sign(
-            { id: user.Id, role: user.Role },
+            { id: user.id || user.Id, role: user.role || user.Role },
             process.env.JWT_SECRET,
             { expiresIn: '24h' }
         );
@@ -74,10 +65,10 @@ const login = async (req, res) => {
         res.status(200).json({
             token,
             user: {
-                id: user.Id,
-                name: user.Name,
-                email: user.Email,
-                role: user.Role
+                id: user.id || user.Id,
+                name: user.name || user.Name,
+                email: user.email || user.Email,
+                role: user.role || user.Role
             }
         });
     } catch (err) {

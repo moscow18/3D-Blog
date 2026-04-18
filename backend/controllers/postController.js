@@ -6,36 +6,36 @@ const getAllPosts = async (req, res) => {
         let params = [];
         let queryStr = `
             SELECT 
-                P.Id AS "Id", 
-                P.Title AS "Title", 
-                P.Content AS "Content", 
-                P.ImageUrl AS "ImageUrl", 
-                P.Tags AS "Tags", 
-                P.UserId AS "UserId", 
-                P.CreatedAt AS "CreatedAt", 
-                P.UpdatedAt AS "UpdatedAt",
-                U.Name as "AuthorName" 
-            FROM Posts P 
-            JOIN Users U ON P.UserId = U.Id 
+                p.Id AS "Id", 
+                p.Title AS "Title", 
+                p.Content AS "Content", 
+                p.ImageUrl AS "ImageUrl", 
+                p.Tags AS "Tags", 
+                p.UserId AS "UserId", 
+                p.CreatedAt AS "CreatedAt", 
+                p.UpdatedAt AS "UpdatedAt",
+                u.Name as "AuthorName" 
+            FROM Posts p 
+            JOIN Users u ON p.UserId = u.Id 
             WHERE 1=1
         `;
 
         if (search) {
             params.push(`%${search}%`);
-            queryStr += ` AND (P.Title ILIKE $${params.length} OR P.Content ILIKE $${params.length})`;
+            queryStr += ` AND (p.Title ILIKE $${params.length} OR p.Content ILIKE $${params.length})`;
         }
 
         if (tag) {
             params.push(`%${tag}%`);
-            queryStr += ` AND P.Tags ILIKE $${params.length}`;
+            queryStr += ` AND p.Tags ILIKE $${params.length}`;
         }
 
         if (userId) {
             params.push(userId);
-            queryStr += ` AND P.UserId = $${params.length}`;
+            queryStr += ` AND p.UserId = $${params.length}`;
         }
 
-        queryStr += ` ORDER BY P.CreatedAt DESC`;
+        queryStr += ` ORDER BY p.CreatedAt DESC`;
 
         const result = await query(queryStr, params);
         res.json(result.rows);
@@ -50,18 +50,18 @@ const getPostById = async (req, res) => {
         const { id } = req.params;
         const result = await query(`
             SELECT 
-                P.Id AS "Id", 
-                P.Title AS "Title", 
-                P.Content AS "Content", 
-                P.ImageUrl AS "ImageUrl", 
-                P.Tags AS "Tags", 
-                P.UserId AS "UserId", 
-                P.CreatedAt AS "CreatedAt", 
-                P.UpdatedAt AS "UpdatedAt",
-                U.Name as "AuthorName" 
-            FROM Posts P 
-            JOIN Users U ON P.UserId = U.Id 
-            WHERE P.Id = $1
+                p.Id AS "Id", 
+                p.Title AS "Title", 
+                p.Content AS "Content", 
+                p.ImageUrl AS "ImageUrl", 
+                p.Tags AS "Tags", 
+                p.UserId AS "UserId", 
+                p.CreatedAt AS "CreatedAt", 
+                p.UpdatedAt AS "UpdatedAt",
+                u.Name as "AuthorName" 
+            FROM Posts p 
+            JOIN Users u ON p.UserId = u.Id 
+            WHERE p.Id = $1
         `, [id]);
         
         if (result.rows.length === 0) {
@@ -84,9 +84,8 @@ const createPost = async (req, res) => {
             return res.status(400).json({ message: 'Title and content are required' });
         }
 
-        // Use same case as SQL script to be safe
         await query(
-            'INSERT INTO Posts ("Title", "Content", "ImageUrl", "Tags", "UserId") VALUES ($1, $2, $3, $4, $5)', 
+            'INSERT INTO Posts (Title, Content, ImageUrl, Tags, UserId) VALUES ($1, $2, $3, $4, $5)', 
             [title, content, imageUrl || '', tags || '', userId]
         );
 
@@ -103,19 +102,21 @@ const updatePost = async (req, res) => {
         const { title, content, imageUrl, tags } = req.body;
         const userId = req.user.id;
 
-        const postCheck = await query('SELECT "UserId" FROM Posts WHERE "Id" = $1', [id]);
+        const postCheck = await query('SELECT UserId FROM Posts WHERE Id = $1', [id]);
 
         if (postCheck.rows.length === 0) {
             return res.status(404).json({ message: 'Post not found' });
         }
 
-        const ownerId = postCheck.rows[0].UserId || postCheck.rows[0].userid;
-        if (ownerId !== userId) {
+        const row = postCheck.rows[0];
+        const postOwnerId = row.UserId || row.userid;
+
+        if (postOwnerId !== userId) {
             return res.status(403).json({ message: 'Not authorized to update this post' });
         }
 
         await query(
-            'UPDATE Posts SET "Title" = $1, "Content" = $2, "ImageUrl" = $3, "Tags" = $4, "UpdatedAt" = NOW() WHERE "Id" = $5', 
+            'UPDATE Posts SET Title = $1, Content = $2, ImageUrl = $3, Tags = $4, UpdatedAt = NOW() WHERE Id = $5', 
             [title, content, imageUrl, tags || '', id]
         );
 
@@ -131,18 +132,20 @@ const deletePost = async (req, res) => {
         const { id } = req.params;
         const userId = req.user.id;
 
-        const postCheck = await query('SELECT "UserId" FROM Posts WHERE "Id" = $1', [id]);
+        const postCheck = await query('SELECT UserId FROM Posts WHERE Id = $1', [id]);
 
         if (postCheck.rows.length === 0) {
             return res.status(404).json({ message: 'Post not found' });
         }
 
-        const ownerId = postCheck.rows[0].UserId || postCheck.rows[0].userid;
-        if (ownerId !== userId) {
+        const row = postCheck.rows[0];
+        const postOwnerId = row.UserId || row.userid;
+
+        if (postOwnerId !== userId) {
             return res.status(403).json({ message: 'Not authorized to delete this post' });
         }
 
-        await query('DELETE FROM Posts WHERE "Id" = $1', [id]);
+        await query('DELETE FROM Posts WHERE Id = $1', [id]);
 
         res.json({ message: 'Post deleted successfully' });
     } catch (err) {
